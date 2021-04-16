@@ -1,0 +1,147 @@
+-- Projekt 2 Udiddit, a social news aggregator
+
+-- 2. Create the DDL for your new schema
+
+
+-- a. Allow new users to register --
+
+CREATE TABLE "users" 
+(
+  "id" SERIAL PRIMARY KEY ,
+  "username" VARCHAR(25) UNIQUE NOT NULL,
+  "last_login" TIMESTAMP
+);
+
+ALTER TABLE "users"
+  ADD CONSTRAINT "username_not_empty" CHECK (LENGTH(TRIM("username")) > 0); 
+
+CREATE INDEX usernames_index ON "users"("username");
+
+-- b. Allow registered users to create new topics --
+
+CREATE TABLE "topics" 
+(
+  "id" SERIAL PRIMARY KEY,
+  "name" VARCHAR(30) UNIQUE NOT NULL,
+  "description" VARCHAR(500)
+);
+
+ALTER TABLE "topics"
+  ADD CONSTRAINT "topic_not_null" CHECK (LENGTH(TRIM("name")) > 0);
+
+CREATE INDEX topics_name ON "topics"("name");
+
+-- c. Allow registered users to create new posts on existing topics --
+
+CREATE TABLE "posts" 
+(
+  "id" SERIAL PRIMARY KEY,
+  "title" VARCHAR(100) UNIQUE NOT NULL,
+  "url" VARCHAR(500), 
+  "text_content" TEXT,
+  "user_id" INTEGER REFERENCES "users" ("id") ON DELETE SET NULL,
+  "topic_id" INTEGER REFERENCES "topics" ("id") ON DELETE CASCADE,
+  "created_on" TIMESTAMP
+);
+
+ALTER TABLE "posts" 
+  ADD CONSTRAINT "url_or_text" CHECK (("url" IS NOT NULL AND "text_content" IS NULL) OR ("url" IS NULL AND "text_content" IS NOT NULL)),
+  ADD CONSTRAINT "post_name_not_empty" CHECK (LENGTH(TRIM("title")) > 0);
+
+CREATE INDEX post_url ON "posts" ( "url" VARCHAR_PATTERN_OPS);
+
+
+-- d.	Allow registered users to comment on existing posts:
+
+
+CREATE TABLE "comments" 
+(
+  "id" SERIAL PRIMARY KEY,
+  "text_content" TEXT NOT NULL,
+  "post_id" INTEGER REFERENCES "posts" ("id") ON DELETE CASCADE,
+  "user_id" INTEGER REFERENCES "users" ("id") ON DELETE SET NULL,
+  "created_on" DATE,
+  "parent_comment_id" INT REFERENCES "comments" ("id") ON DELETE CASCADE
+);
+
+ALTER TABLE "comments"
+  ADD CONSTRAINT text_content_not_empty CHECK ("text_content" IS NOT NULL);
+
+CREATE INDEX comment_index ON "comments"("parent_comment_id");
+
+
+-- e. Make sure that a given user can only vote once on a given post
+
+
+CREATE TABLE "votes" 
+(
+  "id" SERIAL PRIMARY KEY UNIQUE,
+  "value" SMALLINT,
+  "user_id" INTEGER REFERENCES "users" ("id") ON DELETE SET NULL,
+  "post_id" INTEGER REFERENCES "posts" ("id") ON DELETE CASCADE
+);
+
+ALTER TABLE "votes"
+  ADD CONSTRAINT "up_or_down" CHECK ("value" = 1 OR "value" = -1),
+  ADD CONSTRAINT "vote_once" UNIQUE ("user_id", "post_id");
+
+CREATE INDEX post_votes ON "votes"("post_id");
+
+
+-- 3. Migrate the provided Data
+
+
+INSERT INTO "users" ("username")
+SELECT DISTINCT username
+FROM(
+    SELECT DISTINCT username FROM bad_posts 
+    UNION
+    SELECT DISTINCT username FROM bad_comments
+    UNION
+    SELECT DISTINCT regexp_split_to_table("upvotes", ',') AS "username" FROM bad_posts
+    UNION
+    SELECT DISTINCT regexp_split_to_table("downvotes", ',') AS "username" FROM bad_posts) q1
+order by 1;
+
+
+INSERT INTO "topics" ("name")
+  SELECT DISTINCT topic FROM "bad_posts"; 
+
+INSERT INTO "comments" ("text_content", "post_id", "user_id")
+  SELECT badc.text_content, posts.id, users.id
+  FROM bad_comments badc
+  JOIN users
+  ON badc.username = users.username
+  JOIN posts
+  ON posts.id = badc.post_id;
+
+
+
+INSERT INTO "posts" ("title", "url", "text_content", "topic_id", "user_id")
+  SELECT LEFT(badp.title, 100), badp.url, badp.text_content, topics.id, users.id
+  FROM bad_posts badp
+  JOIN topics
+  ON badp.topic = topics.name
+  JOIN users
+  ON badp.username = users.username; 
+
+
+INSERT INTO "votes" ("value", "user_id", "post_id")
+  SELECT 1 AS upvotes, users.id, badp.id
+  FROM (SELECT id, regexp_split_to_table("upvotes", ',') AS "username" FROM bad_posts) badp
+  JOIN users
+  ON badp.username = users.username
+  UNION
+  SELECT -1 AS downvotes, users.id, badp.id
+  FROM (SELECT id, regexp_split_to_table("downvotes", ',') AS "username" FROM bad_posts) badp
+  JOIN users
+  ON badp.username = users.username;
+
+
+
+
+
+
+
+
+
