@@ -1,0 +1,136 @@
+
+
+--- Projekt Deforestination ---
+
+CREATE VIEW forestation AS
+SELECT f.country_code as code, f.country_name as name, f.year as year, f.forest_area_sqkm as forest_area_sqkm, 
+l.total_area_sq_mi as total_area_sq_mi, r.region as region, r.income_group as income_group, 
+ (f.forest_area_sqkm/(l.total_area_sq_mi * 2.59))*100 AS percent_from_total
+FROM forest_area f
+JOIN land_area l
+ON f.country_code = l.country_code
+AND f.year = l.year
+JOIN regions r
+ON l.country_code = r.country_code
+
+-- Immer in Quadratkilometer!!!
+
+-- 1. Global Situation
+
+SELECT year, country_name, forest_area_sqkm 
+FROM forest_area
+WHERE (year = '1990' OR  year = '2016')
+AND country_name ='World'
+
+SELECT c.forest_area_sqkm - o.forest_area_sqkm AS lost
+FROM forest_area AS c
+JOIN forest_area AS o
+ON  (c.year = '2016' AND o.year = '1990'
+AND c.country_name = 'World' AND o.country_name = 'World');
+-1324449
+
+SELECT (c.forest_area_sqkm - o.forest_area_sqkm)*100/o.forest_area_sqkm AS dif_percent
+FROM forest_area AS c
+JOIN forest_area AS o
+ON  (c.year = '2016' AND o.year = '1990'
+AND c.country_name = 'World' AND o.country_name = 'World');
+
+SELECT name, year, (total_area_sq_mi*2.59) AS total_area_sqkm
+FROM forestation
+WHERE year = 2016 AND (total_area_sq_mi*2.59) <1324449
+ORDER BY total_area_sqkm DESC
+Peru	2016	1279999.9891
+
+-- 2. Regional Outlook
+
+CREATE VIEW regional_outlook AS
+SELECT
+c.region,
+a.year,
+sum(a.forest_area_sqkm) as forest_area_sqkm,
+sum(b.total_area_sq_mi*2.59) as total_area_sqkm
+FROM forest_area a
+JOIN land_area b on a.country_code=b.country_code and a.year=b.year
+JOIN regions c on a.country_code=c.country_code
+WHERE a.year in (1990,2016)
+GROUP BY 1,2
+ORDER BY 1,2 asc
+
+SELECT percent_from_total, year, name
+FROM forestation
+WHERE year = '2016'
+AND name = 'World'
+
+SELECT percent_from_total, name, year, forest_area_sqkm
+FROM forestation
+WHERE year = 2016
+AND percent_from_total IS NOT NULL
+ORDER BY 4 DESC
+LIMIT 5
+
+SELECT region, year,(forest_area_sqkm/total_area_sqkm)*100 AS percent
+FROM regional_outlook
+ORDER BY 3 
+
+SELECT region, year,(forest_area_sqkm/total_area_sqkm)*100 AS percent
+FROM regional_outlook
+WHERE year = '1990'
+ORDER BY 3 DESC
+
+SELECT region, year,(forest_area_sqkm/total_area_sqkm)*100 AS percent
+FROM regional_outlook
+WHERE year = '2016'
+ORDER BY 3 DESC
+
+-- 3. Country-Level Detail
+
+SELECT old.country_name, old.forest_area_sqkm - prev.forest_area_sqkm AS difference
+FROM forest_area AS old
+JOIN forest_area AS prev
+ON (old.year = '2016' AND prev.year = '1990')
+AND old.country_name = prev.country_name
+ORDER BY 2 DESC
+
+SELECT old.country_name,
+  100.0*(old.forest_area_sqkm - prev.forest_area_sqkm) / 
+  prev.forest_area_sqkm AS percent
+FROM forest_area AS old
+JOIN forest_area AS prev
+ON  (old.year = '2016' AND prev.year = '1990')
+AND old.country_name = prev.country_name
+ORDER BY percent DESC
+
+SELECT old.country_name, r.region,
+  (prev.forest_area_sqkm - old.forest_area_sqkm) AS change
+FROM forest_area AS old
+JOIN forest_area AS prev
+ON  (old.year = '2016' AND prev.year = '1990')
+AND old.country_name = prev.country_name
+JOIN regions AS r
+ON old.country_name = r.country_name
+ORDER BY change DESC
+
+SELECT old.country_name, r.region,
+  100*((prev.forest_area_sqkm - old.forest_area_sqkm)/prev.forest_area_sqkm) AS change_percent
+FROM forest_area AS old
+JOIN forest_area AS prev
+ON  (old.year = '2016' AND prev.year = '1990')
+AND old.country_name = prev.country_name
+JOIN regions AS r
+ON old.country_name = r.country_name
+ORDER BY change_percent DESC
+
+SELECT distinct(quartiles), COUNT(name) OVER (PARTITION BY quartiles)
+FROM 
+(SELECT name, CASE WHEN percent_from_total <= 25 THEN '0-25%'
+WHEN percent_from_total <= 75 AND percent_from_total > 50 THEN '50-75%'
+WHEN percent_from_total <= 50 AND percent_from_total > 25 THEN '25-50%'
+ELSE '75-100%'
+END AS quartiles FROM forestation
+WHERE percent_from_total IS NOT NULL AND year = 2016) quart;
+
+SELECT name,region, percent_from_total
+FROM forestation
+WHERE percent_from_total >= 75
+AND year = 2016
+ORDER BY 3 DESC
